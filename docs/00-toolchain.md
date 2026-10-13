@@ -40,4 +40,37 @@ cd android
 cd Projects/AdVeto
 source .venv/bin/activate
 python -c "import tensorflow as tf; print(tf.__version__)"
+bash scripts/check_env.sh      # full verification, exits non-zero on failure
+```
+
+## Two failures worth remembering
+
+**1. The Gradle wrapper download died mid-transfer.** `gradle-wrapper.properties`
+shipped with `networkTimeout=10000` (10 s) — far too short for the 131 MB
+distribution, so the stream was cut and surfaced as an obscure
+`SSLTransport.decode` stack trace. Raised to `120000`. Workaround used at the
+time: seed `~/.gradle/wrapper/dists/gradle-8.11.1-bin/<hash>/` with an
+already-downloaded zip instead of re-fetching.
+
+**2. The build was OOM-killed twice.** This box has 7.6 GB RAM; the browser
+alone held 3.75 GB and the 512 MB swap was full, so the kernel killed the
+Gradle daemon (`oom_score_adj:200` makes it the first target) during dex
+merging. Two fixes, both required:
+
+* `gradle.properties` — heap `-Xmx3g` → `-Xmx1500m`, `workers.max=1`,
+  `parallel=false`, and `kotlin.daemon.jvmargs=-Xmx512m` (the Kotlin compile
+  daemon is a *separate* JVM that can be killed independently).
+* `sudo bash scripts/setup_swap.sh` — adds a 4 GiB `/swapfile-adveto` alongside
+  the existing 512 MB `/swapfile` (never `swapoff`s the live one).
+
+Check memory before a long build with `free -h`; if *available* is under
+~1.5 GB, expect a kill.
+
+## Build proof (Batch 1)
+
+```
+./gradlew assembleDebug → BUILD SUCCESSFUL (1m10s)
+app/build/outputs/apk/debug/app-debug.apk  12.7 MB
+  package   org.adveto.app.debug  versionName 0.1.0
+  minSdk 29  targetSdk 35  compileSdk 35   label 'AdVeto'
 ```

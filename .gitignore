@@ -30,6 +30,7 @@ models/**/*.npz
 
 # --- Android / Gradle ---
 android/.gradle/
+android/.kotlin/
 android/build/
 android/app/build/
 android/local.properties

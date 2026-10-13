@@ -50,7 +50,9 @@ OCR failure → image-only; capture denial → logged no-monitoring.
 ## Status
 
 - [x] Repository scaffold
-- [ ] Toolchain: Python/TensorFlow venv, JDK, Android SDK, Gradle
+- [x] Toolchain: Python 3.12 + TensorFlow 2.21 venv, JDK 17, Android SDK 35, Gradle 8.11.1
+      — verified by `scripts/check_env.sh` and a successful `./gradlew assembleDebug`
+      (`org.adveto.app.debug` 0.1.0, minSdk 29 / target 35)
 - [ ] Batch 2 — Week 1–2 feasibility pilot (capture, region detection, overlay) → GO/NO-GO
 - [ ] Batch 3 — Rubric + 3,000-region dual-rater dataset
 - [ ] Batch 4 — Image / text / fusion benchmark + int8 quantisation
