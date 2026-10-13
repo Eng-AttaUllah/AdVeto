@@ -2,4 +2,18 @@
     <string name="app_name">AdVeto</string>
     <string name="subtitle">Ad-region detection and age-aware risk classification\nAndroid 10–15 (API 29–35) · research prototype</string>
     <string name="toolchain_ok">Toolchain OK — build 0.1.0</string>
+
+    <string name="status_placeholder">Press “Start capture” to begin the GO/NO-GO probe.</string>
+    <string name="status_format">%1$s</string>
+
+    <string name="btn_start_capture">Start capture</string>
+    <string name="btn_capturing">Capturing… (tap to restart)</string>
+    <string name="btn_stop_capture">Stop capture</string>
+    <string name="btn_allow_overlay">Allow overlay (display over other apps)</string>
+    <string name="btn_overlay_ok">Overlay permission granted</string>
+    <string name="btn_test_overlay">Test overlay — covers bottom banner 2.5 s</string>
+
+    <string name="notif_channel_capture">Screen capture</string>
+    <string name="notif_capture_title">AdVeto is analysing the screen</string>
+    <string name="notif_capture_text">Frames are processed on-device and never saved</string>
 </resources>

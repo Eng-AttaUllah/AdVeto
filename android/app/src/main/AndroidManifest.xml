@@ -1,15 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-      Batch 2 (feasibility pilot) adds, after the GO/NO-GO checklist:
-        FOREGROUND_SERVICE + FOREGROUND_SERVICE_MEDIA_PROJECTION  (stage 1 capture)
-        SYSTEM_ALERT_WINDOW                                       (stage 6 overlay)
-        POST_NOTIFICATIONS                                        (foreground-service notification)
-        QUERY_ALL_PACKAGES / package queries                       (source app of an event)
-      Capture permission (MediaProjection) is requested at runtime via an explicit
-      user consent dialog — it is never granted at install time.
+      Stage (1) capture — MediaProjection requires an explicit user consent
+      dialog at runtime; it is never granted at install time. From API 34 the
+      capture must run inside a foreground service of type `mediaProjection`.
     -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Stage (6) overlay — drawn over other applications' advertisements. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Foreground-service notification (mandatory from API 33). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Stage (7) — record which application produced an ad. UsageStats is used
+      rather than QUERY_ALL_PACKAGES so the sideloaded prototype does not
+      declare a permission the platform treats as sensitive.
+
+      ML Kit text recognition (stage 3b) is added in Batch 2c.
+    -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -20,12 +42,23 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".capture.ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- Draws the cover over an advertisement region (stage 6). -->
+        <service
+            android:name=".overlay.OverlayService"
+            android:exported="false" />
     </application>
 
 </manifest>
