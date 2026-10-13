@@ -3,17 +3,19 @@ package org.adveto.app.pipeline
 import android.graphics.Bitmap
 import org.adveto.app.detect.AdRegionDetector
 import org.adveto.app.log.Event
+import org.adveto.app.ocr.OcrReader
+import org.adveto.app.ocr.OcrResult
 import org.adveto.app.policy.AgePolicy
 import org.adveto.app.policy.PolicyResult
 import org.adveto.app.policy.RiskCategory
 
 /**
- * Stages (3a)/(3b) — the classification seam.
+ * Stages (3a)/(3b) — the classification seams.
  *
  * The Android side never knows *which* model it is running, only that it maps
- * a region crop to four risk scores. That keeps the device build independent
- * of the training stack and lets Batch 4 swap in whichever model won the
- * benchmark (float or int8) without touching the pipeline.
+ * a region (or a string) to four risk scores. That keeps the device build
+ * independent of the training stack and lets Batch 4 swap in whichever model
+ * won the benchmark (float or int8) without touching the pipeline.
  */
 interface Classifier {
     /** Identifies the artifact in the event log (float/int8/stub...). */
@@ -26,40 +28,61 @@ interface Classifier {
     fun classify(region: Bitmap): FloatArray
 }
 
+interface TextClassifier {
+    val name: String
+    val available: Boolean
+
+    /** @return four scores in [RiskCategory.ORDER] order. */
+    fun classify(text: String): FloatArray
+}
+
 /**
- * Placeholder used until Batch 4 ships a trained artifact.
- *
- * It returns an all-zero vector, which the policy must turn into ABSTAIN —
- * that is the correct and *testable* behaviour: with no model the system must
- * never claim an ad is safe. Wiring it in exercises the full seven-stage path
- * (capture → detect → classify → fuse → policy → log) before any model exists,
- * and every event honestly reads "pending-model".
+ * Placeholder used until Batch 4 ships trained artifacts. Both return
+ * all-zero vectors, which the policy must turn into ABSTAIN — correct and
+ * *testable*: with no model the system must never claim an ad is safe.
+ * Wiring these in exercises the full seven-stage path before any model exists,
+ * and every logged event honestly reads `pending-model`.
  */
 object PendingModelClassifier : Classifier {
     override val name: String = "pending-model"
     override val available: Boolean = false
-
     override fun classify(region: Bitmap): FloatArray =
         FloatArray(RiskCategory.ORDER.size)
 }
 
+object PendingTextClassifier : TextClassifier {
+    override val name: String = "pending-text-model"
+    override val available: Boolean = false
+    override fun classify(text: String): FloatArray =
+        FloatArray(RiskCategory.ORDER.size)
+}
+
 /**
- * Stage (4) fusion + orchestration.
+ * Stages (3)-(5) — orchestration and score-level fusion.
  *
- * With only one modality available the weighted average collapses to that
- * modality's vector — the same code path Batch 4 uses once OCR/text arrives,
- * where `p = w_img * p_img + w_txt * p_txt`. The fusion ablation later
- * toggles these weights, not this structure.
+ * Fusion is the weighted average of the proposal §7 stage (4):
+ *     p = (w_img * p_img + w_txt * p_txt) / (w_img + w_txt)
+ * weights tuned on validation data; the logistic fusion is evaluated later as
+ * an ablation and will be a second implementation of the same seam.
+ *
+ * Modality is decided by what actually happened, never assumed:
+ *   `pending-model`  no artifact yet
+ *   `image-only`     OCR returned nothing (empty / failed / timed out)
+ *   `image`          OCR worked but no text model
+ *   `fusion`         both paths contributed
  */
 class Pipeline(
     private val classifier: Classifier = PendingModelClassifier,
+    private val textClassifier: TextClassifier = PendingTextClassifier,
+    private val ocr: OcrReader? = null,
     private val policy: AgePolicy = AgePolicy.default(),
-    private val fusionWeights: FloatArray = floatArrayOf(1f, 0f), // img, txt
+    private val fusionWeights: FloatArray = floatArrayOf(0.6f, 0.4f), // img, txt
 ) {
 
     data class Result(
         val events: List<Event>,
-        val detectMs: Double,
+        /** Localisation + classification + policy, end to end, ms. */
+        val decisionMs: Double,
         val regions: Int,
     )
 
@@ -67,18 +90,49 @@ class Pipeline(
         frame: Bitmap,
         regions: List<AdRegionDetector.Region>,
         ageYears: Int,
-        density: Float,
         packageName: String,
+        detectMs: Double = 0.0,
     ): Result {
         val started = System.nanoTime()
+
         val events = regions.map { region ->
-            val policyResult: PolicyResult = if (!classifier.available) {
-                // No model: run the policy anyway so the abstain path is live.
-                policy.decide(classifier.classify(frame), ageYears)
-            } else {
-                val pImg = classifier.classify(crop(frame, region))
-                val fused = fuse(pImg, FloatArray(pImg.size)) // text vector empty
-                policy.decide(fused, ageYears)
+            val crop = crop(frame, region)
+
+            val pImg = classifier.classify(crop)
+
+            // Stage (3b): OCR is attempted per region and is allowed to fail.
+            val ocrResult: OcrResult = ocr?.read(crop)
+                ?: OcrResult("", error = "no-reader")
+
+            val useText = textClassifier.available && !ocrResult.isEmpty
+            val pTxt = if (useText) textClassifier.classify(ocrResult.text)
+            else FloatArray(pImg.size)
+
+            val fused = if (classifier.available) fuse(pImg, pTxt) else pImg
+            val policyResult: PolicyResult = policy.decide(fused, ageYears)
+
+            val modality = when {
+                !classifier.available -> "pending-model"
+                ocrResult.failed -> "image-only"
+                !textClassifier.available -> "image"
+                else -> "fusion"
+            }
+
+            val reason = when {
+                !classifier.available -> "model-not-integrated; " + policyResult.reason
+                ocrResult.failed -> buildString {
+                    append("ocr=")
+                    append(
+                        when {
+                            ocrResult.timedOut -> "timeout"
+                            ocrResult.error != null -> "error:${ocrResult.error}"
+                            else -> "empty"
+                        }
+                    )
+                    append("; ")
+                    append(policyResult.reason)
+                }
+                else -> policyResult.reason
             }
 
             Event(
@@ -87,19 +141,19 @@ class Pipeline(
                 category = policyResult.category.name,
                 confidence = policyResult.confidence,
                 outcome = policyResult.decision.name.lowercase(),
-                reason = policyResult.reason,
-                modality = if (classifier.available) "image" else "pending-model",
+                reason = reason,
+                modality = modality,
                 regionSource = region.source.name,
-                detectMs = 0.0,
+                detectMs = detectMs,
                 decisionMs = (System.nanoTime() - started) / 1_000_000.0,
                 ageBand = policyResult.band.id,
             )
         }
-        val detectMs = (System.nanoTime() - started) / 1_000_000.0
-        return Result(events, detectMs, regions.size)
+
+        return Result(events, (System.nanoTime() - started) / 1_000_000.0, regions.size)
     }
 
-    /** Weighted score-level fusion (proposal §7 stage 4). */
+    /** Weighted score-level fusion (proposal §7, stage 4). */
     private fun fuse(image: FloatArray, text: FloatArray): FloatArray {
         val wImg = fusionWeights.getOrElse(0) { 1f }
         val wTxt = fusionWeights.getOrElse(1) { 0f }
@@ -111,8 +165,8 @@ class Pipeline(
 
     private fun crop(frame: Bitmap, region: AdRegionDetector.Region): Bitmap {
         val r = region.rect
-        val left = r.left.coerceIn(0, frame.width - 1)
-        val top = r.top.coerceIn(0, frame.height - 1)
+        val left = r.left.coerceIn(0, (frame.width - 1).coerceAtLeast(0))
+        val top = r.top.coerceIn(0, (frame.height - 1).coerceAtLeast(0))
         val w = r.width().coerceIn(1, frame.width - left)
         val h = r.height().coerceIn(1, frame.height - top)
         return Bitmap.createBitmap(frame, left, top, w, h)

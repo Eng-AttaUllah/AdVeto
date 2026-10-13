@@ -58,6 +58,10 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
+    // Stage (3b) — on-device text recognition (proposal §10, ML Kit).
+    // Bundled model: no network, no cloud call, consistent with §8 privacy.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
     // Age-policy decision cases are pure JVM tests — they run without a device
     // (./gradlew test), which is what makes deliverable 3 executable.
     testImplementation("junit:junit:4.13.2")

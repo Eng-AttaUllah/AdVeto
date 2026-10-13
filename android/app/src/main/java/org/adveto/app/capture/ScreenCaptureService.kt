@@ -25,6 +25,7 @@ import androidx.core.app.NotificationCompat
 import org.adveto.app.R
 import org.adveto.app.detect.AdRegionDetector
 import org.adveto.app.log.EventLogger
+import org.adveto.app.ocr.MlKitOcr
 import org.adveto.app.pipeline.Pipeline
 import org.adveto.app.source.ForegroundApp
 
@@ -96,11 +97,16 @@ class ScreenCaptureService : Service() {
         private set
 
     /**
-     * Stages (3)-(5). Uses [org.adveto.app.pipeline.PendingModelClassifier]
-     * until Batch 4 ships a trained artifact; the policy still runs so the
-     * abstain path is live and every logged row is honest.
+     * Stages (3)-(5), including ML Kit OCR. Uses
+     * [org.adveto.app.pipeline.PendingModelClassifier] until Batch 4 ships a
+     * trained artifact; the policy still runs so the abstain path is live and
+     * every logged row is honest.
+     *
+     * OCR failures are expected, not exceptional: an empty/timeout result
+     * downgrades the event to `image-only` (proposal §7 fallbacks).
      */
-    private val pipeline = Pipeline()
+    private val ocr = MlKitOcr()
+    private val pipeline = Pipeline(ocr = ocr)
 
     /**
      * Configured child age. Read per frame because the parent can change it at
@@ -268,9 +274,11 @@ class ScreenCaptureService : Service() {
             latestFrame = bitmap
 
             // Stage (2): localise advertisement regions within this frame.
+            val detectStart = System.nanoTime()
             val regions = AdRegionDetector.detect(bitmap, resources.displayMetrics.density)
+            val detectMs = (System.nanoTime() - detectStart) / 1_000_000.0
 
-            // Stages (3)-(5) then (7): classify, apply the age policy, log.
+            // Stages (3)-(5) then (7): OCR + classify, age policy, log.
             // With no trained artifact wired in yet, the classifier returns an
             // all-zero vector and the policy must abstain — the system never
             // claims an ad is safe just because a model is missing.
@@ -278,8 +286,8 @@ class ScreenCaptureService : Service() {
                 frame = bitmap,
                 regions = regions,
                 ageYears = configuredAge(),
-                density = resources.displayMetrics.density,
                 packageName = ForegroundApp.current(this),
+                detectMs = detectMs,
             )
             result.events.forEach { EventLogger.log(this, it) }
 
@@ -345,6 +353,7 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         teardown("service-destroyed")
+        ocr.close()
         instance = null
         super.onDestroy()
     }
