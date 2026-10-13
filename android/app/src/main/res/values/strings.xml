@@ -12,8 +12,13 @@
     <string name="btn_allow_overlay">Allow overlay (display over other apps)</string>
     <string name="btn_overlay_ok">Overlay permission granted</string>
     <string name="btn_test_overlay">Test overlay — covers bottom banner 2.5 s</string>
+    <string name="btn_dashboard">Parent dashboard</string>
 
     <string name="notif_channel_capture">Screen capture</string>
     <string name="notif_capture_title">AdVeto is analysing the screen</string>
     <string name="notif_capture_text">Frames are processed on-device and never saved</string>
+
+    <string name="dashboard_title">Parent dashboard</string>
+    <string name="dashboard_refresh">Refresh</string>
+    <string name="dashboard_loading">Loading…</string>
 </resources>

@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.devtools.ksp")          // Room annotation processor
 }
 
 android {
@@ -39,6 +40,11 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    // KSP needs the schema location so Room migrations are checkable later.
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 }
 
 dependencies {
@@ -46,4 +52,13 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.activity:activity-ktx:1.9.3")
+
+    // Stage (7): SQLite via Room for the local event log.
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+
+    // Age-policy decision cases are pure JVM tests — they run without a device
+    // (./gradlew test), which is what makes deliverable 3 executable.
+    testImplementation("junit:junit:4.13.2")
 }

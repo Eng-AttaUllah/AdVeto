@@ -50,6 +50,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Stage (7) — read-only aggregation over the event log. -->
+        <activity
+            android:name=".dashboard.DashboardActivity"
+            android:exported="false" />
+
         <service
             android:name=".capture.ScreenCaptureService"
             android:exported="false"

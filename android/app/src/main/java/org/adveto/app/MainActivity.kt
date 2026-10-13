@@ -118,6 +118,9 @@ class MainActivity : ComponentActivity() {
         stopBtn.setOnClickListener { stopCapture() }
         overlayBtn.setOnClickListener { requestOverlayPermission() }
         overlayTestBtn.setOnClickListener { testOverlay() }
+        findViewById<Button>(R.id.dashboardButton).setOnClickListener {
+            startActivity(Intent(this, org.adveto.app.dashboard.DashboardActivity::class.java))
+        }
 
         requestNotificationPermission()
         render()

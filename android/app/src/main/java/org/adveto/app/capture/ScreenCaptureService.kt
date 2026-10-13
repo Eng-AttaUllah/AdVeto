@@ -24,6 +24,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import org.adveto.app.R
 import org.adveto.app.detect.AdRegionDetector
+import org.adveto.app.log.EventLogger
+import org.adveto.app.pipeline.Pipeline
+import org.adveto.app.source.ForegroundApp
 
 /**
  * Stage (1) — screen capture.
@@ -91,6 +94,21 @@ class ScreenCaptureService : Service() {
     /** Latest frame retained for the UI/detector; memory-only by design. */
     @Volatile var latestFrame: Bitmap? = null
         private set
+
+    /**
+     * Stages (3)-(5). Uses [org.adveto.app.pipeline.PendingModelClassifier]
+     * until Batch 4 ships a trained artifact; the policy still runs so the
+     * abstain path is live and every logged row is honest.
+     */
+    private val pipeline = Pipeline()
+
+    /**
+     * Configured child age. Read per frame because the parent can change it at
+     * any time and the policy is evaluated against the *current* value — the
+     * age band is a policy input, not a device property.
+     */
+    private fun configuredAge(): Int =
+        getSharedPreferences("adveto", MODE_PRIVATE).getInt("age_years", 8)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -251,12 +269,24 @@ class ScreenCaptureService : Service() {
 
             // Stage (2): localise advertisement regions within this frame.
             val regions = AdRegionDetector.detect(bitmap, resources.displayMetrics.density)
-            val elapsedMs = (System.nanoTime() - started) / 1_000_000.0
 
-            // In-memory only at this stage — Room logging lands in Batch 2b.
-            // Frames themselves are NEVER persisted (proposal §8).
+            // Stages (3)-(5) then (7): classify, apply the age policy, log.
+            // With no trained artifact wired in yet, the classifier returns an
+            // all-zero vector and the policy must abstain — the system never
+            // claims an ad is safe just because a model is missing.
+            val result = pipeline.process(
+                frame = bitmap,
+                regions = regions,
+                ageYears = configuredAge(),
+                density = resources.displayMetrics.density,
+                packageName = ForegroundApp.current(this),
+            )
+            result.events.forEach { EventLogger.log(this, it) }
+
+            val elapsedMs = (System.nanoTime() - started) / 1_000_000.0
+            // Frames themselves are NEVER persisted (proposal §8) — only rows.
             Log.i(TAG, "frame ${bitmap.width}x${bitmap.height} regions=${regions.size} " +
-                    "detect_ms=%.1f".format(elapsedMs))
+                    "detect+policy_ms=%.1f events=${result.events.size}".format(elapsedMs))
 
             sendBroadcast(Intent(ACTION_FRAME_PROCESSED).apply {
                 setPackage(packageName)
