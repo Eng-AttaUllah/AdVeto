@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Deliberately a framework theme (not Material Components) so the Batch-1
+      toolchain proof has zero extra dependencies. Batch 2 moves the UI to
+      Jetpack Compose and this becomes a Material3 base theme.
+    -->
+    <style name="Theme.AdVeto" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#0D1B2A</item>
+        <item name="android:windowBackground">#0D1B2A</item>
+    </style>
+</resources>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Batch 2 (feasibility pilot) adds, after the GO/NO-GO checklist:
+        FOREGROUND_SERVICE + FOREGROUND_SERVICE_MEDIA_PROJECTION  (stage 1 capture)
+        SYSTEM_ALERT_WINDOW                                       (stage 6 overlay)
+        POST_NOTIFICATIONS                                        (foreground-service notification)
+        QUERY_ALL_PACKAGES / package queries                       (source app of an event)
+      Capture permission (MediaProjection) is requested at runtime via an explicit
+      user consent dialog — it is never granted at install time.
+    -->
+
+    <application
+        android:allowBackup="false"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AdVeto">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

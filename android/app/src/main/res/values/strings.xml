@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">AdVeto</string>
+    <string name="subtitle">Ad-region detection and age-aware risk classification\nAndroid 10–15 (API 29–35) · research prototype</string>
+    <string name="toolchain_ok">Toolchain OK — build 0.1.0</string>
+</resources>
