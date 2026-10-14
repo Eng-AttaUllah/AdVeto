@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One source application in the parent dashboard.
+
+  The proposal's claim is about applications that *repeatedly* produced a
+  category, so the row carries three separate facts that must not be collapsed:
+  how often (count + share bar), how recently (relative last-seen), and what
+  the system did about it (per-outcome counts). An all-time total alone cannot
+  distinguish a recurring offender from a one-off seen weeks ago.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:orientation="vertical"
+    android:paddingTop="12dp"
+    android:paddingBottom="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/appLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/textPrimary"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                tools:text="YouTube" />
+
+            <TextView
+                android:id="@+id/appPackage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="middle"
+                android:fontFamily="monospace"
+                android:singleLine="true"
+                android:textColor="@color/textSecondary"
+                android:textSize="11sp"
+                tools:text="com.google.android.youtube" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/appCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="@color/textPrimary"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            tools:text="42" />
+    </LinearLayout>
+
+    <!-- Share of the window's total, so "repeatedly" is relative not absolute. -->
+    <FrameLayout
+        android:id="@+id/appShareTrack"
+        android:layout_width="match_parent"
+        android:layout_height="6dp"
+        android:layout_marginTop="8dp">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_bar_track" />
+
+        <View
+            android:id="@+id/appShareBar"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_bar_fill" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/appMeta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textColor="@color/textSecondary"
+        android:textSize="12sp"
+        tools:text="gambling 31 · violence 11 · safe 0\nlast seen 4 min ago" />
+</LinearLayout>

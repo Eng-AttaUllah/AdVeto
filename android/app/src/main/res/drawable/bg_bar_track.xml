@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Track behind a proportional share bar; the filled child is set in code. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/outline" />
+    <corners android:radius="999dp" />
+</shape>

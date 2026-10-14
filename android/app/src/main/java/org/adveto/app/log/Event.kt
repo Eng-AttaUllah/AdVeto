@@ -57,6 +57,32 @@ data class CategoryCount(
 
 data class OutcomeCount(val outcome: String, val n: Int)
 
+/** Distinct modality counts — the evidence behind the "no model yet" caveat. */
+data class ModalityCount(val modality: String, val n: Int)
+
+/**
+ * Per-application rollup over a time window.
+ *
+ * `avgConfidence`/`avgDecisionMs` are returned as Double because SQLite's
+ * AVG() always yields REAL regardless of the column's declared type; asking
+ * Room for a Float there is a silent narrowing, so the conversion is done
+ * explicitly at the call site instead.
+ */
+data class AppSummary(
+    val packageName: String,
+    val n: Int,
+    /** Most recent event for this application inside the window. */
+    val lastSeen: Long,
+    val avgConfidence: Double,
+    val avgDecisionMs: Double,
+)
+
+data class PackageOutcomeCount(
+    val packageName: String,
+    val outcome: String,
+    val n: Int,
+)
+
 @Dao
 interface EventDao {
     @Insert
@@ -76,6 +102,51 @@ interface EventDao {
 
     @Query("SELECT COUNT(*) FROM events")
     fun count(): Int
+
+    // --- windowed variants -------------------------------------------------
+    // "Which applications *repeatedly* produced which categories" is a claim
+    // about a period, not about all time. All-time totals cannot separate a
+    // recurring offender from a one-off that was seen weeks ago, so every
+    // dashboard aggregate is also offered against a since-boundary. A caller
+    // wanting all-time passes 0.
+
+    @Query("SELECT COUNT(*) FROM events WHERE timestamp >= :since")
+    fun countSince(since: Long): Int
+
+    @Query(
+        "SELECT outcome, COUNT(*) AS n FROM events WHERE timestamp >= :since " +
+            "GROUP BY outcome ORDER BY n DESC"
+    )
+    fun outcomesSince(since: Long): List<OutcomeCount>
+
+    @Query(
+        "SELECT modality, COUNT(*) AS n FROM events WHERE timestamp >= :since " +
+            "GROUP BY modality ORDER BY n DESC"
+    )
+    fun modalitiesSince(since: Long): List<ModalityCount>
+
+    @Query(
+        "SELECT packageName, category, COUNT(*) AS n FROM events " +
+            "WHERE timestamp >= :since GROUP BY packageName, category ORDER BY n DESC"
+    )
+    fun byPackageAndCategorySince(since: Long): List<CategoryCount>
+
+    @Query(
+        "SELECT packageName, COUNT(*) AS n, MAX(timestamp) AS lastSeen, " +
+            "AVG(confidence) AS avgConfidence, AVG(decisionMs) AS avgDecisionMs " +
+            "FROM events WHERE timestamp >= :since " +
+            "GROUP BY packageName ORDER BY n DESC, lastSeen DESC"
+    )
+    fun appSummariesSince(since: Long): List<AppSummary>
+
+    @Query(
+        "SELECT packageName, outcome, COUNT(*) AS n FROM events " +
+            "WHERE timestamp >= :since GROUP BY packageName, outcome"
+    )
+    fun packageOutcomesSince(since: Long): List<PackageOutcomeCount>
+
+    @Query("SELECT MAX(timestamp) FROM events")
+    fun lastTimestamp(): Long?
 
     /** For the privacy/retention procedure: purge at the close of a window. */
     @Query("DELETE FROM events WHERE timestamp < :before")
