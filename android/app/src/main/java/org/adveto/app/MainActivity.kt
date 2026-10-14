@@ -39,6 +39,9 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "AdVetoUI"
+
+        /** Window for the operator to reach the ad-heavy app before the probe. */
+        private const val OVERLAY_DELAY_MS = 12_000L
     }
 
     private lateinit var status: TextView
@@ -194,31 +197,70 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Stage (6) probe: cover the bottom banner slot for 2.5 s. Run this while
-     * a third-party app is in the foreground with an ad visible — the gate
-     * records whether the overlay actually drew over it.
+     * Stage (6) probe: cover the bottom banner slot for 2.5 s — but on a
+     * delay, because pressing the button puts *this* app in the foreground and
+     * an overlay drawn immediately would cover our own screen rather than the
+     * third-party advertisement. The delay is what makes the cross-application
+     * claim actually testable: switch to the ad-heavy app during the window
+     * and the cover paints over it there.
+     *
+     * @return delay in ms so the UI can tell the operator what to do.
      */
-    private fun testOverlay() {
+    private fun testOverlay(): Long {
         if (!OverlayService.canDraw(this)) {
             overlayResult = "no-permission — tap 'Allow overlay' first"
             render()
-            return
+            return 0L
         }
         val dm = resources.displayMetrics
         val h = (50 * dm.density).toInt()          // 50dp banner band
         val w = dm.widthPixels
 
-        sendBroadcast(Intent(OverlayService.ACTION_SHOW).apply {
-            setPackage(packageName)
-            putExtra(OverlayService.EXTRA_LEFT, 0)
-            putExtra(OverlayService.EXTRA_TOP, dm.heightPixels - h)
-            putExtra(OverlayService.EXTRA_RIGHT, w)
-            putExtra(OverlayService.EXTRA_BOTTOM, dm.heightPixels)
-            putExtra(OverlayService.EXTRA_LABEL, "AdVeto — covered (gate probe)")
-        })
+        overlayResult = "firing in ${OVERLAY_DELAY_MS / 1000} s — switch to the ad app now"
+        render()
+
         ui.postDelayed({
-            sendBroadcast(Intent(OverlayService.ACTION_HIDE).setPackage(packageName))
-        }, 2500)
+            startOverlay(
+                OverlayService.ACTION_SHOW,
+                rect = intArrayOf(0, dm.heightPixels - h, w, dm.heightPixels),
+                label = "AdVeto — covered (gate probe)"
+            )
+            overlayResult = "shown — did it cover the ad? (hide in 2.5 s)"
+            render()
+
+            ui.postDelayed({
+                startOverlay(OverlayService.ACTION_HIDE)
+                overlayResult = "shown + hidden — record PASS if it covered the ad"
+                render()
+            }, 2500L)
+        }, OVERLAY_DELAY_MS)
+
+        return OVERLAY_DELAY_MS
+    }
+
+    /**
+     * Direct service start rather than a broadcast: the overlay must be
+     * drawable while this activity is *not* foreground (that is the whole
+     * point of the probe), and an explicit startService to our own component
+     * survives that as long as the capture foreground service keeps the
+     * process privileged. Failure is surfaced, never swallowed.
+     */
+    private fun startOverlay(action: String, rect: IntArray? = null, label: String? = null) {
+        try {
+            val i = Intent(this, OverlayService::class.java).setAction(action)
+            if (rect != null && rect.size == 4) {
+                i.putExtra(OverlayService.EXTRA_LEFT, rect[0])
+                i.putExtra(OverlayService.EXTRA_TOP, rect[1])
+                i.putExtra(OverlayService.EXTRA_RIGHT, rect[2])
+                i.putExtra(OverlayService.EXTRA_BOTTOM, rect[3])
+            }
+            label?.let { i.putExtra(OverlayService.EXTRA_LABEL, it) }
+            startService(i)
+        } catch (e: Exception) {
+            Log.w(TAG, "overlay start failed: ${e.message}")
+            overlayResult = "failed: ${e.javaClass.simpleName}"
+            render()
+        }
     }
 
     // --- rendering ---------------------------------------------------------

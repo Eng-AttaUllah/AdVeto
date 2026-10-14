@@ -1,0 +1,17 @@
+AdVeto — stated test device (proposal §10)
+recorded: 2026-10-13T19:16:51+05:00
+
+serial          = REDACTED
+manufacturer    = OnePlus
+model           = DE2118
+board/platform  = holi
+hardware        = qcom
+android release = 12
+sdk int         = 31
+abi             = arm64-v8a,armeabi-v7a,armeabi
+total ram       = MemTotal:        3568988 kB
+density         = Physical density: 480
+resolution      = Physical size: 1080x2400
+
+proposal target = mid-range handset, 6 GB RAM, Snapdragon 6-series
+                 class chipset (or equivalent), Android 12

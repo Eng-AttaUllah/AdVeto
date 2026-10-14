@@ -40,6 +40,9 @@ android/externalNativeBuild/
 *.apk
 *.aab
 
+# --- Gate evidence (committed selectively; captures carry device/app ids) ---
+docs/gate/logcat_*.txt
+
 # --- Reports regenerated at runtime ---
 ml/reports/**/*.html
 

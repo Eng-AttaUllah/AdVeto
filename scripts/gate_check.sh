@@ -13,8 +13,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/docs/gate"
 APK="$ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
 PKG="org.adveto.app.debug"
-ACTIVITY="$PKG/.MainActivity"
-# Debug build has applicationIdSuffix ".debug"; the release id has no suffix.
+# applicationIdSuffix ".debug" changes the PACKAGE only — the activity class
+# name is unchanged, so the shorthand ".MainActivity" would expand to
+# org.adveto.app.debug.MainActivity, which does not exist. Name it in full.
+ACTIVITY="$PKG/org.adveto.app.MainActivity"
 
 mkdir -p "$OUT"
 
