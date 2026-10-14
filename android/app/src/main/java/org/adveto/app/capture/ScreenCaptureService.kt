@@ -23,6 +23,7 @@ import android.util.DisplayMetrics
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import org.adveto.app.R
+import org.adveto.app.config.AppPrefs
 import org.adveto.app.detect.AdRegionDetector
 import org.adveto.app.log.EventLogger
 import org.adveto.app.ocr.MlKitOcr
@@ -64,6 +65,7 @@ class ScreenCaptureService : Service() {
         const val ACTION_FRAME_PROCESSED = "org.adveto.app.FRAME_PROCESSED"
         const val EXTRA_FRAME_MS = "frame_ms"
         const val EXTRA_REGION_COUNT = "region_count"
+        const val EXTRA_TEXT_HITS = "text_hits"
         const val EXTRA_WIDTH = "width"
         const val EXTRA_HEIGHT = "height"
 
@@ -112,9 +114,13 @@ class ScreenCaptureService : Service() {
      * Configured child age. Read per frame because the parent can change it at
      * any time and the policy is evaluated against the *current* value — the
      * age band is a policy input, not a device property.
+     *
+     * Read through [AppPrefs] rather than a private copy of the preference key:
+     * the dashboard reports verdicts under this same band, and two independent
+     * copies of the key would let it narrate decisions under a band the policy
+     * never used.
      */
-    private fun configuredAge(): Int =
-        getSharedPreferences("adveto", MODE_PRIVATE).getInt("age_years", 8)
+    private fun configuredAge(): Int = AppPrefs.ageYears(this)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -137,6 +143,14 @@ class ScreenCaptureService : Service() {
     }
 
     private fun handleStart(intent: Intent) {
+        // Promote to foreground FIRST, before any validation. This service is
+        // started with startForegroundService(), which mandates startForeground()
+        // within the system timeout regardless of how the command turns out.
+        // Returning early on bad extras without promoting is exactly the
+        // ForegroundServiceDidNotStartInTimeException crash, so the contract is
+        // honoured up front and the failure path below only has to tear down.
+        startForegroundInternal()
+
         if (running) return
 
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
@@ -152,8 +166,6 @@ class ScreenCaptureService : Service() {
             stopSelf()
             return
         }
-
-        startForegroundInternal()
 
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val mp = mpm.getMediaProjection(resultCode, resultData) ?: run {
@@ -241,12 +253,23 @@ class ScreenCaptureService : Service() {
         reader.setOnImageAvailableListener({ r -> onImage(r) }, handler)
 
         val mp = projection ?: return
-        virtualDisplay = mp.createVirtualDisplay(
+        val vd = mp.createVirtualDisplay(
             "AdVeto",
             screenWidth, screenHeight, densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             reader.surface, null, handler
         )
+        // createVirtualDisplay() returns null when the projection or surface is
+        // already gone (revoked mid-start, low memory). Leaving that silent would
+        // look identical to a frame stall — no frames, no error. Surface it.
+        if (vd == null) {
+            Log.e(TAG, "createVirtualDisplay returned null; no frames will arrive")
+            reader.close()
+            emitState("denied", "virtual-display-null")
+            stopSelf()
+            return
+        }
+        virtualDisplay = vd
         imageReader = reader
     }
 
@@ -294,12 +317,14 @@ class ScreenCaptureService : Service() {
             val elapsedMs = (System.nanoTime() - started) / 1_000_000.0
             // Frames themselves are NEVER persisted (proposal §8) — only rows.
             Log.i(TAG, "frame ${bitmap.width}x${bitmap.height} regions=${regions.size} " +
+                    "textHits=${result.textHits} " +
                     "detect+policy_ms=%.1f events=${result.events.size}".format(elapsedMs))
 
             sendBroadcast(Intent(ACTION_FRAME_PROCESSED).apply {
                 setPackage(packageName)
                 putExtra(EXTRA_FRAME_MS, elapsedMs)
                 putExtra(EXTRA_REGION_COUNT, regions.size)
+                putExtra(EXTRA_TEXT_HITS, result.textHits)
                 putExtra(EXTRA_WIDTH, bitmap.width)
                 putExtra(EXTRA_HEIGHT, bitmap.height)
             })

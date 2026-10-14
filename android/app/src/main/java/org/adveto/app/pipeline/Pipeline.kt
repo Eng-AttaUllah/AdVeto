@@ -84,6 +84,18 @@ class Pipeline(
         /** Localisation + classification + policy, end to end, ms. */
         val decisionMs: Double,
         val regions: Int,
+        /**
+         * Candidates where OCR actually recovered text.
+         *
+         * This exists because the geometry heuristic proposes the same three
+         * slots on *every* frame, so a raw `regions > 0` count is vacuous — it
+         * would "pass" with no advertisement on screen at all. A candidate
+         * that simultaneously sits at a banner position *and* carries recognised
+         * text is the honest interim signal that something ad-like was
+         * localised. It is still a proxy: only the accessibility / learned
+         * detector work turns it into a real localisation measurement.
+         */
+        val textHits: Int,
     )
 
     fun process(
@@ -94,6 +106,7 @@ class Pipeline(
         detectMs: Double = 0.0,
     ): Result {
         val started = System.nanoTime()
+        var textHits = 0
 
         val events = regions.map { region ->
             val crop = crop(frame, region)
@@ -103,6 +116,7 @@ class Pipeline(
             // Stage (3b): OCR is attempted per region and is allowed to fail.
             val ocrResult: OcrResult = ocr?.read(crop)
                 ?: OcrResult("", error = "no-reader")
+            if (!ocrResult.isEmpty) textHits++
 
             val useText = textClassifier.available && !ocrResult.isEmpty
             val pTxt = if (useText) textClassifier.classify(ocrResult.text)
@@ -150,7 +164,12 @@ class Pipeline(
             )
         }
 
-        return Result(events, (System.nanoTime() - started) / 1_000_000.0, regions.size)
+        return Result(
+            events,
+            (System.nanoTime() - started) / 1_000_000.0,
+            regions.size,
+            textHits,
+        )
     }
 
     /** Weighted score-level fusion (proposal §7, stage 4). */
