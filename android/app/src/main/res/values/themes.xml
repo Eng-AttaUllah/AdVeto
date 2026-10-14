@@ -2,11 +2,18 @@
 <resources>
     <!--
       Deliberately a framework theme (not Material Components) so the Batch-1
-      toolchain proof has zero extra dependencies. Batch 2 moves the UI to
-      Jetpack Compose and this becomes a Material3 base theme.
+      toolchain proof has zero extra dependencies. The decision to stay on
+      view-based XML rather than Compose is recorded in the toolchain notes:
+      it keeps the pilot's build memory footprint inside the 4.5 GB swap this
+      box has available.
+
+      Colours come from values/colors.xml so the launcher icon, the status
+      chip and the window share one palette.
     -->
     <style name="Theme.AdVeto" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#0D1B2A</item>
-        <item name="android:windowBackground">#0D1B2A</item>
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:navigationBarColor">@color/background</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

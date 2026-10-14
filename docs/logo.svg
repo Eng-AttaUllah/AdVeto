@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512" role="img" aria-label="AdVeto">
+  <!--
+    AdVeto identity mark.
+
+    A shield (protection of a minor) carrying a solid band across its lower
+    third. That band is the covered advertisement banner — the same 50dp band
+    OverlayService paints over in stage (6) — so the mark depicts the product's
+    central action rather than decorating it.
+
+    Geometry is deliberately chunky and low-detail so it survives down to a
+    48dp launcher icon and up to a printed poster without redrawing.
+
+    Colours:
+      #0B1622  ground       (matches the app's dark theme)
+      #E6EDF3  shield       (primary foreground)
+      #F59E0B  covered band (the vetoed advertisement slot)
+  -->
+  <rect width="108" height="108" rx="24" fill="#0B1622"/>
+  <path d="M54 26 L79 35 C79 57 70 72 54 82 C38 72 29 57 29 35 Z" fill="#E6EDF3"/>
+  <!--
+    The vetoed advertisement band, inset to x=36..72. The shield's right edge
+    curves from x=76.9 at the band's top row (y=52) down to x=73.0 at its
+    bottom row (y=62), so a band spanning the full 29..79 width would overhang
+    the tapering sides. 36..72 clears the narrowest point with a 1-unit margin
+    while still reading as the covered banner.
+  -->
+  <rect x="36" y="52" width="36" height="10" rx="2" fill="#F59E0B"/>
+</svg>

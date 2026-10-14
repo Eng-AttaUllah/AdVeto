@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ground and surfaces. Deep navy, matching the theme's window background. -->
+    <color name="background">#0B1622</color>
+    <color name="surface">#132335</color>
+    <color name="outline">#243B53</color>
+
+    <!-- Text. -->
+    <color name="textPrimary">#E6EDF3</color>
+    <color name="textSecondary">#9FB3C8</color>
+
+    <!-- Accent — the covered-ad band from the logo, reused as the UI accent. -->
+    <color name="accent">#F59E0B</color>
+
+    <!-- Lifecycle states, surfaced on the status chip. -->
+    <color name="stateRunning">#34D399</color>
+    <color name="stateError">#EF4444</color>
+    <color name="stateWarn">#F59E0B</color>
+    <color name="stateIdle">#456179</color>
+
+    <!-- Adaptive-icon ground; kept separate so the launcher can tint it. -->
+    <color name="ic_launcher_background">#0B1622</color>
+</resources>
