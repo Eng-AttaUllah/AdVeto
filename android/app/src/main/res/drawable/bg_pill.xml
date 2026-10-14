@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status chip. The solid colour is a placeholder only — MainActivity recolours
+  it at runtime from the capture lifecycle state, so the real value is code.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/stateIdle" />
+    <corners android:radius="999dp" />
+</shape>

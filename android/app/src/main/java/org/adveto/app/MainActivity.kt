@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.drawable.GradientDrawable
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
@@ -42,9 +43,34 @@ class MainActivity : ComponentActivity() {
 
         /** Window for the operator to reach the ad-heavy app before the probe. */
         private const val OVERLAY_DELAY_MS = 12_000L
+
+        /**
+         * Sustain threshold for GO-1. The proposal's claim is that authorisation
+         * is not merely *obtained* but *held*; a projection that dies after a
+         * few seconds says nothing about foreground-service stability, so a
+         * short capture is reported as in-progress rather than as a pass.
+         */
+        private const val SUSTAIN_MS = 60_000L
+
+        /**
+         * Per-frame latency budget, taken from the capture interval itself: the
+         * service requests one frame per second, so a frame that costs more
+         * than 1000 ms of detection + policy cannot sustain the rate it was
+         * asked for. Colouring the metric against this makes an over-budget
+         * detector visible on the pilot device rather than buried in logcat.
+         */
+        private const val FRAME_BUDGET_MS = 1000.0
     }
 
-    private lateinit var status: TextView
+    private lateinit var stateChip: TextView
+    private lateinit var captureReasonText: TextView
+    private lateinit var framesValue: TextView
+    private lateinit var latencyValue: TextView
+    private lateinit var hitsValue: TextView
+    private lateinit var uptimeValue: TextView
+    private lateinit var gate1Value: TextView
+    private lateinit var gate2Value: TextView
+    private lateinit var gate3Value: TextView
     private lateinit var captureBtn: Button
     private lateinit var overlayBtn: Button
 
@@ -53,10 +79,22 @@ class MainActivity : ComponentActivity() {
 
     private var frameCount = 0
     private var lastRegionCount = 0
+    private var lastTextHits = 0
     private var lastDetectMs = 0.0
     private var captureState = "not-started"
     private var captureReason = "-"
     private var overlayResult = "-"
+
+    // --- gate bookkeeping --------------------------------------------------
+    // GO-1 is a *sustained* claim, so elapsed time is part of the evidence: a
+    // capture that dies at 12 s must not read as a pass. GO-2 is remembered as
+    // "ever observed" because the proposal only claims one localised frame
+    // inside the window. GO-3 is recorded only when the cover was genuinely
+    // drawn — not when the probe was merely armed.
+    private var captureStartedAtMs = 0L
+    private var lastUptimeMs = 0L
+    private var gate2Observed = false
+    private var gate3ShownAtMs = 0L
 
     // --- consent for screen capture (stage 1) -----------------------------
     private val captureLauncher =
@@ -89,14 +127,32 @@ class MainActivity : ComponentActivity() {
                 ScreenCaptureService.ACTION_FRAME_PROCESSED -> {
                     frameCount++
                     lastRegionCount = intent.getIntExtra(ScreenCaptureService.EXTRA_REGION_COUNT, 0)
+                    lastTextHits = intent.getIntExtra(ScreenCaptureService.EXTRA_TEXT_HITS, 0)
                     lastDetectMs = intent.getDoubleExtra(ScreenCaptureService.EXTRA_FRAME_MS, 0.0)
+                    // Latched, never cleared: GO-2 claims one localised frame
+                    // inside the window, so a later clean frame must not
+                    // un-observe it. The per-frame value still drives the
+                    // live metric above.
+                    if (lastTextHits > 0) gate2Observed = true
                     if (capturing) captureState = "running"
                     render()
                 }
                 ScreenCaptureService.ACTION_CAPTURE_STATE -> {
                     captureState = intent.getStringExtra(ScreenCaptureService.EXTRA_STATE) ?: "?"
                     captureReason = intent.getStringExtra(ScreenCaptureService.EXTRA_REASON) ?: "-"
+                    val wasCapturing = capturing
                     capturing = captureState == "running"
+                    if (capturing && !wasCapturing) {
+                        // Fresh session: reset the sustain clock and the
+                        // per-session counters, but keep gate2Observed so a
+                        // second probe cannot erase a first probe's result.
+                        captureStartedAtMs = System.currentTimeMillis()
+                        lastUptimeMs = 0L
+                    } else if (!capturing && wasCapturing) {
+                        captureStartedAtMs.takeIf { it != 0L }?.let {
+                            lastUptimeMs = System.currentTimeMillis() - it
+                        }
+                    }
                     render()
                 }
                 "org.adveto.app.OVERLAY_RESULT" -> {
@@ -111,7 +167,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        status = findViewById(R.id.statusText)
+        stateChip = findViewById(R.id.stateChip)
+        captureReasonText = findViewById(R.id.captureReasonText)
+        framesValue = findViewById(R.id.framesValue)
+        latencyValue = findViewById(R.id.latencyValue)
+        hitsValue = findViewById(R.id.hitsValue)
+        uptimeValue = findViewById(R.id.uptimeValue)
+        gate1Value = findViewById(R.id.gate1Value)
+        gate2Value = findViewById(R.id.gate2Value)
+        gate3Value = findViewById(R.id.gate3Value)
         captureBtn = findViewById(R.id.captureButton)
         overlayBtn = findViewById(R.id.overlayButton)
         val stopBtn = findViewById<Button>(R.id.stopButton)
@@ -179,6 +243,12 @@ class MainActivity : ComponentActivity() {
         capturing = false
         captureState = "stopped"
         captureReason = "user-request"
+        // Freeze the sustain clock here as well: stopping is a deliberate end,
+        // and leaving the clock running would let a later render overstate the
+        // duration that was actually observed.
+        captureStartedAtMs.takeIf { it != 0L }?.let {
+            lastUptimeMs = System.currentTimeMillis() - it
+        }
         render()
     }
 
@@ -225,6 +295,13 @@ class MainActivity : ComponentActivity() {
                 rect = intArrayOf(0, dm.heightPixels - h, w, dm.heightPixels),
                 label = "AdVeto — covered (gate probe)"
             )
+            // Recorded only now, not when the button was pressed: arming the
+            // probe proves nothing, and GO-3 is a claim that the cover was
+            // actually drawn. startOverlay() has already swallowed a start
+            // failure into overlayResult, so a failed start must not latch.
+            if (!overlayResult.startsWith("failed")) {
+                gate3ShownAtMs = System.currentTimeMillis()
+            }
             overlayResult = "shown — did it cover the ad? (hide in 2.5 s)"
             render()
 
@@ -266,20 +343,109 @@ class MainActivity : ComponentActivity() {
     // --- rendering ---------------------------------------------------------
 
     private fun render() {
-        val gate = buildString {
-            append("GO/NO-GO probe\n")
-            append("1. capture .............. $captureState ($captureReason)\n")
-            append("2. frames processed ..... $frameCount  last detect %.1f ms\n"
-                .format(lastDetectMs))
-            append("   regions in last frame  $lastRegionCount\n")
-            append("3. overlay probe ........ $overlayResult")
+        // --- pipeline card ---
+        val chipColour = when {
+            capturing -> R.color.stateRunning
+            captureState == "denied" || captureState == "failed" -> R.color.stateError
+            captureState == "stopped" || captureState == "revoked" -> R.color.stateWarn
+            else -> R.color.stateIdle
         }
-        status.text = getString(R.string.status_format, gate)
+        stateChip.background = stateChip.background.apply {
+            (this as? GradientDrawable)?.setColor(ContextCompat.getColor(this@MainActivity, chipColour))
+        }
+        stateChip.text = captureState
+        captureReasonText.text = captureReason
 
+        framesValue.text = frameCount.toString()
+        latencyValue.text = if (frameCount > 0) "%.0f".format(lastDetectMs) else "—"
+        latencyValue.setTextColor(
+            ContextCompat.getColor(
+                this,
+                // A per-frame budget is 1000 ms (the capture interval); over
+                // that the detector cannot keep the rate it is asked for.
+                when {
+                    frameCount == 0 -> R.color.textPrimary
+                    lastDetectMs > FRAME_BUDGET_MS -> R.color.stateError
+                    lastDetectMs > FRAME_BUDGET_MS * 0.6 -> R.color.stateWarn
+                    else -> R.color.stateRunning
+                }
+            )
+        )
+        hitsValue.text = lastTextHits.toString()
+        uptimeValue.text = formatDuration(currentUptimeMs())
+
+        // --- gate card ---
+        // Each verdict is stated from what was actually observed. Nothing here
+        // reports a pass on the strength of an intent being sent.
+        val uptime = currentUptimeMs()
+        when {
+            uptime == 0L -> {
+                gate1Value.text = getString(R.string.gate_value_idle)
+                gate1Value.setTextColor(ContextCompat.getColor(this, R.color.textSecondary))
+            }
+            uptime >= SUSTAIN_MS -> {
+                gate1Value.text = "observed — held ${formatDuration(uptime)}"
+                gate1Value.setTextColor(ContextCompat.getColor(this, R.color.stateRunning))
+            }
+            capturing -> {
+                gate1Value.text =
+                    "in progress — ${formatDuration(uptime)} of ${formatDuration(SUSTAIN_MS)}"
+                gate1Value.setTextColor(ContextCompat.getColor(this, R.color.stateWarn))
+            }
+            else -> {
+                gate1Value.text = "not sustained — ended at ${formatDuration(uptime)}"
+                gate1Value.setTextColor(ContextCompat.getColor(this, R.color.stateError))
+            }
+        }
+
+        if (gate2Observed) {
+            gate2Value.text = "observed — text recognised in an ad-positioned slot"
+            gate2Value.setTextColor(ContextCompat.getColor(this, R.color.stateRunning))
+        } else if (capturing) {
+            gate2Value.text = "pending — $lastRegionCount slot(s) proposed, no text-hit yet"
+            gate2Value.setTextColor(ContextCompat.getColor(this, R.color.stateWarn))
+        } else {
+            gate2Value.text = getString(R.string.gate_value_idle)
+            gate2Value.setTextColor(ContextCompat.getColor(this, R.color.textSecondary))
+        }
+
+        // The service can only confirm the cover was drawn. Whether it landed on
+        // a real advertisement needs a human, so GO-3 stays provisional until
+        // the operator confirms it — it is never shown as an outright pass.
+        when {
+            gate3ShownAtMs != 0L -> {
+                gate3Value.text = "cover drawn — confirm it painted over the ad"
+                gate3Value.setTextColor(ContextCompat.getColor(this, R.color.stateWarn))
+            }
+            overlayResult.startsWith("no-permission") -> {
+                gate3Value.text = "blocked — overlay permission not granted"
+                gate3Value.setTextColor(ContextCompat.getColor(this, R.color.stateError))
+            }
+            else -> {
+                gate3Value.text = getString(R.string.gate_value_idle)
+                gate3Value.setTextColor(ContextCompat.getColor(this, R.color.textSecondary))
+            }
+        }
+
+        // --- controls ---
         captureBtn.text = if (capturing) getString(R.string.btn_capturing)
         else getString(R.string.btn_start_capture)
         overlayBtn.text = if (OverlayService.canDraw(this)) getString(R.string.btn_overlay_ok)
         else getString(R.string.btn_allow_overlay)
+    }
+
+    /** Live while capturing, frozen at the session's end otherwise. */
+    private fun currentUptimeMs(): Long = when {
+        capturing && captureStartedAtMs != 0L -> System.currentTimeMillis() - captureStartedAtMs
+        else -> lastUptimeMs
+    }
+
+    private fun formatDuration(ms: Long): String {
+        if (ms <= 0L) return "0 s"
+        val totalSeconds = ms / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return if (minutes > 0) "%d m %02d s".format(minutes, seconds) else "$totalSeconds s"
     }
 
     override fun onDestroy() {

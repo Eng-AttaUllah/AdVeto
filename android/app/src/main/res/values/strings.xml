@@ -1,10 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AdVeto</string>
     <string name="subtitle">Ad-region detection and age-aware risk classification\nAndroid 10–15 (API 29–35) · research prototype</string>
-    <string name="toolchain_ok">Toolchain OK — build 0.1.0</string>
 
-    <string name="status_placeholder">Press “Start capture” to begin the GO/NO-GO probe.</string>
-    <string name="status_format">%1$s</string>
+    <!-- Card headings -->
+    <string name="section_pipeline">Pipeline</string>
+    <string name="section_gate">GO / NO-GO gate</string>
+    <string name="section_controls">Controls</string>
+
+    <!-- Pipeline metrics -->
+    <string name="metric_frames">Frames</string>
+    <string name="metric_latency">Detect + policy</string>
+    <string name="metric_hits">Text-hits</string>
+    <string name="metric_uptime">Elapsed</string>
+
+    <!-- Gate items -->
+    <string name="gate1_title">1 · Capture authorised and sustained</string>
+    <string name="gate2_title">2 · Advertisement region localised</string>
+    <string name="gate3_title">3 · Overlay covers a third-party ad</string>
+    <string name="gate_value_idle">not started</string>
 
     <string name="btn_start_capture">Start capture</string>
     <string name="btn_capturing">Capturing… (tap to restart)</string>
@@ -18,7 +32,28 @@
     <string name="notif_capture_title">AdVeto is analysing the screen</string>
     <string name="notif_capture_text">Frames are processed on-device and never saved</string>
 
+    <!-- ── Parent dashboard ─────────────────────────────────────────── -->
     <string name="dashboard_title">Parent dashboard</string>
+    <string name="dashboard_subtitle">Read-only aggregation over the on-device event log</string>
     <string name="dashboard_refresh">Refresh</string>
     <string name="dashboard_loading">Loading…</string>
+
+    <string name="window_label">Window</string>
+    <string name="window_24h">24 h</string>
+    <string name="window_7d">7 d</string>
+    <string name="window_all">All</string>
+
+    <string name="section_summary">Summary</string>
+    <string name="section_sources">Source applications</string>
+    <string name="section_recent">Recent decisions</string>
+
+    <string name="stat_band_format">Age band in force — %1$s (%2$d years). The policy decides against this band.</string>
+
+    <string name="decision_mix">Decision mix</string>
+    <string name="no_events_title">No events yet</string>
+    <string name="no_events_body">Start capture and open an ad-heavy application. Nothing is recorded until a region is proposed.</string>
+
+    <string name="recent_none">No decisions in this window.</string>
+
+    <string name="privacy_note">Frames are never stored — only these decision records. Purge is available via EventDao.deleteOlderThan.</string>
 </resources>
