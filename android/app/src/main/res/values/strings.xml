@@ -45,7 +45,7 @@
 
     <string name="section_summary">Summary</string>
     <string name="section_sources">Source applications</string>
-    <string name="section_recent">Recent decisions</string>
+    <string name="section_recent">Recent advertisements</string>
 
     <string name="stat_band_format">Age band in force — %1$s (%2$d years). The policy decides against this band.</string>
 
@@ -53,7 +53,17 @@
     <string name="no_events_title">No events yet</string>
     <string name="no_events_body">Start capture and open an ad-heavy application. Nothing is recorded until a region is proposed.</string>
 
-    <string name="recent_none">No decisions in this window.</string>
+    <string name="recent_none">No advertisements in this window.</string>
+
+    <!-- Occurrence rows -->
+    <string name="category_unclassified">not classified</string>
+    <string name="duration_unknown">seen once · duration unknown</string>
+    <string name="duration_observed_many">observed %1$s · %2$d samples</string>
+    <string name="recent_sampling_note">Span runs from first sighting to last — an unsampled gap can shorten it, and consecutive advertisements from one application count together. Tap an advertisement for full detail.</string>
+
+    <!-- Detail dialog -->
+    <string name="detail_title">Advertisement detail</string>
+    <string name="detail_stub_note">No trained classifier is integrated yet (Batch 4), so no risk category was produced for this row. Category and confidence are placeholders, not an assessment of the advertisement.</string>
 
     <string name="privacy_note">Frames are never stored — only these decision records. Purge is available via EventDao.deleteOlderThan.</string>
 </resources>

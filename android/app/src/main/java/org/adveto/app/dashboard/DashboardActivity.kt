@@ -1,6 +1,7 @@
 package org.adveto.app.dashboard
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -16,14 +17,19 @@ import androidx.core.view.doOnLayout
 import androidx.core.view.updateLayoutParams
 import org.adveto.app.R
 import org.adveto.app.config.AppPrefs
+import org.adveto.app.log.AdOccurrence
 import org.adveto.app.log.AppSummary
 import org.adveto.app.log.CategoryCount
-import org.adveto.app.log.Event
 import org.adveto.app.log.EventLogger
 import org.adveto.app.log.ModalityCount
 import org.adveto.app.log.OutcomeCount
 import org.adveto.app.log.PackageOutcomeCount
+import org.adveto.app.log.formatSpan
+import org.adveto.app.log.groupOccurrences
 import org.adveto.app.policy.Decision
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Stage (7) — parent dashboard.
@@ -53,8 +59,19 @@ import org.adveto.app.policy.Decision
  */
 class DashboardActivity : Activity() {
 
-    /** Cap on the recent list; the log is append-only and grows at ~1 Hz. */
-    private val recentLimit = 12
+    /**
+     * Cap on rows fetched to build the recent list.
+     *
+     * This bounds *rows*, not occurrences, and that distinction is why it is
+     * no longer 12: a row is one region of one frame, while an occurrence is
+     * many frames. The old cap would have bought four frames — barely enough
+     * to bound a single advertisement, let alone to show the parent several.
+     * 240 rows is on the order of 80 frames, a few minutes of capture.
+     */
+    private val recentRowLimit = 240
+
+    /** Cap on occurrences rendered; the list is read, not paged. */
+    private val occurrenceLimit = 10
 
     private lateinit var summaryEvents: TextView
     private lateinit var summaryLast: TextView
@@ -128,14 +145,17 @@ class DashboardActivity : Activity() {
             val apps = dao.appSummariesSince(cutoff)
             val categories = dao.byPackageAndCategorySince(cutoff)
             val packageOutcomes = dao.packageOutcomesSince(cutoff)
-            val recent = dao.recent(recentLimit)
-                .filter { it.timestamp >= cutoff }
+            // Grouped here rather than in render(): this is the read-only
+            // database pass, and it runs off the main thread where the sort
+            // and the 240-row materialisation are not the frame budget's
+            // problem.
+            val occurrences = groupOccurrences(dao.recentSince(cutoff, recentRowLimit))
             val lastTs = dao.lastTimestamp()
 
             runOnUiThread {
                 renderSummary(total, outcomes, modalities, lastTs, now)
                 renderSources(apps, categories, packageOutcomes, total)
-                renderRecent(recent, now)
+                renderRecent(occurrences.take(occurrenceLimit))
             }
         }
     }
@@ -256,42 +276,129 @@ class DashboardActivity : Activity() {
         }
     }
 
-    private fun renderRecent(recent: List<Event>, now: Long) {
+    /**
+     * Recent advertisements, one row per occurrence.
+     *
+     * The list is deliberately occurrence-shaped rather than row-shaped: what
+     * a parent needs is "Free Fire showed four gambling ads", and the raw log
+     * would instead hand them 47 rows for those same frames.
+     */
+    private fun renderRecent(occurrences: List<AdOccurrence>) {
         recentList.removeAllViews()
 
-        if (recent.isEmpty()) {
+        if (occurrences.isEmpty()) {
             recentList.addView(caveatView(getString(R.string.recent_none)))
             return
         }
 
-        recent.forEach { event ->
+        occurrences.forEach { occurrence ->
             val row = LayoutInflater.from(this)
                 .inflate(R.layout.row_event, recentList, false)
 
             row.findViewById<TextView>(R.id.eventTitle).text =
-                "${appLabel(event.packageName)} → ${event.category.lowercase().replace('_', '/')}"
+                appLabel(occurrence.packageName)
 
-            val meta = buildString {
-                append(relative(event.timestamp, now))
-                append(" · ").append(event.modality)
-                append(" · ").append(event.ageBand).append(" band")
-                if (event.confidence > 0f) {
-                    append(" · conf %.2f".format(event.confidence))
+            row.findViewById<TextView>(R.id.eventMeta).text =
+                "${displayCategory(occurrence)} · ${absolute(occurrence.firstSeen)}"
+
+            row.findViewById<TextView>(R.id.eventSpan).text =
+                if (occurrence.hasSpan) {
+                    getString(
+                        R.string.duration_observed_many,
+                        formatSpan(occurrence.spanMs),
+                        occurrence.samples,
+                    )
+                } else {
+                    getString(R.string.duration_unknown)
                 }
-            }
-            row.findViewById<TextView>(R.id.eventMeta).text = meta
 
             val outcomeView = row.findViewById<TextView>(R.id.eventOutcome)
-            outcomeView.text = event.outcome
+            outcomeView.text = occurrence.outcome
             // Recolour the existing pill rather than setBackgroundColor(), which
             // would replace the rounded shape drawable with a flat rectangle.
             (outcomeView.background.mutate() as? GradientDrawable)?.setColor(
-                ContextCompat.getColor(this, outcomeColour(event.outcome))
+                ContextCompat.getColor(this, outcomeColour(occurrence.outcome))
             )
 
+            row.setOnClickListener { showDetail(occurrence) }
             recentList.addView(row)
         }
     }
+
+    // --- detail dialog -------------------------------------------------------
+
+    private fun showDetail(occurrence: AdOccurrence) {
+        val view = LayoutInflater.from(this)
+            .inflate(R.layout.dialog_ad_detail, recentList, false)
+
+        view.findViewById<TextView>(R.id.detailTitle).text =
+            appLabel(occurrence.packageName)
+        view.findViewById<TextView>(R.id.detailSubtitle).text = occurrence.packageName
+        view.findViewById<TextView>(R.id.detailBody).text = detailText(occurrence)
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.detail_title)
+            .setView(view)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    /**
+     * Every field the log already holds, not just the three the list fits.
+     *
+     * `regionSource` answers where in the frame the region was proposed, and
+     * `reason` names the rule that fired — the latter is what makes a verdict
+     * reproducible after the fact, so it is never truncated. Hence a
+     * scrollable dialog rather than a toast: a cut-off reason string would
+     * destroy the only field that explains why the system behaved as it did.
+     */
+    private fun detailText(occurrence: AdOccurrence): String {
+        val rows = listOf(
+            "category" to displayCategory(occurrence),
+            "outcome" to occurrence.outcome,
+            "first seen" to absolute(occurrence.firstSeen),
+            "last seen" to absolute(occurrence.lastSeen),
+            "observed" to if (occurrence.hasSpan) {
+                "${formatSpan(occurrence.spanMs)} across ${occurrence.samples} frames"
+            } else {
+                "duration unknown (1 frame)"
+            },
+            "age band" to occurrence.ageBand,
+            "modality" to occurrence.modality,
+            "regions" to occurrence.regionSources.joinToString(", ").ifEmpty { "-" },
+            "confidence" to "%.3f".format(occurrence.confidence),
+            "rows" to occurrence.events.size.toString(),
+            "avg detect" to "%.1f ms".format(occurrence.events.map { it.detectMs }.average()),
+            "avg end-to-end" to "%.1f ms".format(occurrence.events.map { it.decisionMs }.average()),
+            "reason" to occurrence.events.last().reason,
+        )
+
+        // Padded to the longest key so the monospace column reads as a table
+        // rather than as a ragged list of labels.
+        val width = rows.maxOf { it.first.length }
+        val body = rows.joinToString("\n") { (key, value) -> "${key.padEnd(width)}  $value" }
+
+        return if (occurrence.unclassified) {
+            "$body\n\n" + getString(R.string.detail_stub_note)
+        } else {
+            body
+        }
+    }
+
+    /**
+     * Category as it may honestly be shown.
+     *
+     * Under the stub the score vector is all zeros, so `AgePolicy`'s argmax
+     * resolves to index 0 = `SAFE_GENERAL` on every frame. Printing that raw
+     * would tell a parent the advertisement was assessed as safe when no
+     * assessment happened — the worst available misreading on this screen.
+     *
+     * The test is on modality rather than on category, so the real category
+     * appears unchanged the moment Batch 4 installs a trained artifact.
+     */
+    private fun displayCategory(occurrence: AdOccurrence): String =
+        if (occurrence.unclassified) getString(R.string.category_unclassified)
+        else occurrence.category.lowercase().replace('_', '/')
 
     // --- small view builders ------------------------------------------------
 
@@ -366,6 +473,17 @@ class DashboardActivity : Activity() {
         DateUtils.getRelativeTimeSpanString(
             timestamp, now, DateUtils.MINUTE_IN_MILLIS
         ).toString()
+
+    /**
+     * Absolute local date and time — `19 Oct 2026 · 16:48:03`.
+     *
+     * Relative time cannot answer the question this screen is asked. "4 min
+     * ago" is useless in the conversation that follows ("did you see it this
+     * morning?"), and an occurrence that started before midnight yesterday
+     * would otherwise appear to sit inside today.
+     */
+    private fun absolute(timestamp: Long): String =
+        SimpleDateFormat("d MMM yyyy · HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()

@@ -104,6 +104,17 @@ class Pipeline(
         ageYears: Int,
         packageName: String,
         detectMs: Double = 0.0,
+        /**
+         * Identity of the frame being processed.
+         *
+         * Stamped by the capture layer *once* per frame and written to every
+         * row this call emits, so the three region rows of one moment share a
+         * timestamp. Defaulting to "now" keeps single-frame callers honest
+         * without needing to know about the concept; `ScreenCaptureService`
+         * always passes its own so a frame has one identity even if
+         * processing takes a few hundred milliseconds.
+         */
+        frameId: Long = System.currentTimeMillis(),
     ): Result {
         val started = System.nanoTime()
         var textHits = 0
@@ -150,7 +161,7 @@ class Pipeline(
             }
 
             Event(
-                timestamp = System.currentTimeMillis(),
+                timestamp = frameId,
                 packageName = packageName,
                 category = policyResult.category.name,
                 confidence = policyResult.confidence,
@@ -161,6 +172,7 @@ class Pipeline(
                 detectMs = detectMs,
                 decisionMs = (System.nanoTime() - started) / 1_000_000.0,
                 ageBand = policyResult.band.id,
+                frameId = frameId,
             )
         }
 

@@ -247,6 +247,22 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:orientation="vertical" />
+
+                <!--
+                  Sampling is content-driven, so a span is a sampled value
+                  rather than a measurement. Saying so where the number is
+                  read, rather than in a footnote nobody reaches, is the
+                  difference between a parent understanding the evidence and
+                  taking 4 m 53 s as measured airtime.
+                -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="2dp"
+                    android:text="@string/recent_sampling_note"
+                    android:textColor="@color/textSecondary"
+                    android:textSize="10.5sp" />
             </LinearLayout>
 
             <TextView

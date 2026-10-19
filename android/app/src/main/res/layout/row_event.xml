@@ -1,38 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One logged decision in the recent-activity list. -->
+<!--
+  One advertisement *occurrence* in the recent list: a run of frames in which
+  an application kept producing the same category.
+
+  Three lines because the duration needs its own. Squashing "observed 4 m 53 s
+  · 6 samples" into the meta line with the date would produce a string that
+  wraps to two lines on the 720p-class handsets in scope and reads as noise
+  rather than as the parent's actual question — how long did that run?
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:background="?android:attr/selectableItemBackground"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp">
+    android:paddingTop="9dp"
+    android:paddingBottom="9dp">
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
         android:layout_weight="1"
         android:orientation="vertical">
 
+        <!-- Platform: the application that served the advertisement. -->
         <TextView
             android:id="@+id/eventTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:ellipsize="middle"
-            android:fontFamily="monospace"
-            android:singleLine="true"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:textColor="@color/textPrimary"
-            android:textSize="12.5sp"
-            tools:text="com.dts.freefireth → gambling" />
+            android:textSize="14sp"
+            android:textStyle="bold"
+            tools:text="Free Fire" />
 
+        <!-- Category · absolute date · time. -->
         <TextView
             android:id="@+id/eventMeta"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
             android:textColor="@color/textSecondary"
             android:textSize="11sp"
-            tools:text="4 min ago · image · 6-9 band" />
+            tools:text="not classified · 19 Oct 2026 · 16:48:03" />
+
+        <!-- Observation span. Lower bound, never airtime. -->
+        <TextView
+            android:id="@+id/eventSpan"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:textColor="@color/textSecondary"
+            android:textSize="11sp"
+            tools:text="observed 4 m 53 s · 6 samples" />
     </LinearLayout>
 
     <TextView
@@ -48,5 +71,5 @@
         android:textColor="#FFFFFF"
         android:textSize="10sp"
         android:textStyle="bold"
-        tools:text="cover" />
+        tools:text="abstain" />
 </LinearLayout>

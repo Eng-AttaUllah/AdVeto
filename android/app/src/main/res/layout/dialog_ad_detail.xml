@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Full detail behind one advertisement occurrence.
+
+  Deliberately a ScrollView: the reason string alone can reach 120+ characters
+  ("model-not-integrated; confidence 0.000 < tau 0.500") and AlertDialog's
+  plain setMessage() does not scroll it — the tail would simply be cut off,
+  which is the worst possible fate for the one field that explains *why* the
+  system behaved as it did.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    android:paddingTop="4dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/detailTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textColor="@color/textPrimary"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            tools:text="Free Fire" />
+
+        <TextView
+            android:id="@+id/detailSubtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="@color/textSecondary"
+            android:textSize="11.5sp"
+            tools:text="com.dts.freefireth" />
+
+        <TextView
+            android:id="@+id/detailBody"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="3dp"
+            android:textColor="@color/textPrimary"
+            android:textIsSelectable="true"
+            android:textSize="12sp"
+            tools:text="observed  4 m 53 s" />
+    </LinearLayout>
+</ScrollView>

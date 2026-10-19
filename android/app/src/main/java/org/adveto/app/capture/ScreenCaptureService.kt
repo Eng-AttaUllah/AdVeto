@@ -305,12 +305,19 @@ class ScreenCaptureService : Service() {
             // With no trained artifact wired in yet, the classifier returns an
             // all-zero vector and the policy must abstain — the system never
             // claims an ad is safe just because a model is missing.
+            // One identity for this moment. Stamped before processing rather
+            // than inside the region loop, so OCR time cannot let row A and
+            // row B of the *same* frame land in different seconds and split
+            // one observation into two.
+            val frameId = System.currentTimeMillis()
+
             val result = pipeline.process(
                 frame = bitmap,
                 regions = regions,
                 ageYears = configuredAge(),
                 packageName = ForegroundApp.current(this),
                 detectMs = detectMs,
+                frameId = frameId,
             )
             result.events.forEach { EventLogger.log(this, it) }
 

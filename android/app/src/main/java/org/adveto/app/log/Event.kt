@@ -9,6 +9,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import java.util.concurrent.Executors
 
 /**
@@ -46,6 +48,20 @@ data class Event(
     val decisionMs: Double,
     /** Target age band id the policy evaluated against. */
     val ageBand: String,
+    /**
+     * Capture time (ms) of the frame that produced this row.
+     *
+     * One frame yields one row *per proposed region* — up to three — and all
+     * of them carry this same value. That identity is what makes an
+     * "observation" a frame rather than a region: without it, counting rows
+     * would silently overstate observations by the region heuristic's factor
+     * of three, and first/last sighting could not distinguish one frame's
+     * three rows from three separate moments.
+     *
+     * 0 only for rows written before schema v2; the migration backfills it
+     * from [timestamp].
+     */
+    val frameId: Long = 0L,
 )
 
 /** Row shape for the "which apps keep showing this" dashboard query. */
@@ -90,6 +106,20 @@ interface EventDao {
 
     @Query("SELECT * FROM events ORDER BY timestamp DESC LIMIT :limit")
     fun recent(limit: Int): List<Event>
+
+    /**
+     * Recent rows inside the selected window.
+     *
+     * The dashboard groups these into ad *occurrences*, so it needs more than
+     * a row cap to be useful under the window selector: capping at 12 rows
+     * would show three occurrences worth of frames while the Sources card
+     * above narrates hundreds.
+     */
+    @Query(
+        "SELECT * FROM events WHERE timestamp >= :since " +
+            "ORDER BY timestamp DESC LIMIT :limit"
+    )
+    fun recentSince(since: Long, limit: Int): List<Event>
 
     @Query(
         "SELECT packageName, category, COUNT(*) AS n FROM events " +
@@ -153,11 +183,28 @@ interface EventDao {
     fun deleteOlderThan(before: Long): Int
 }
 
-@Database(entities = [Event::class], version = 1, exportSchema = true)
+@Database(entities = [Event::class], version = 2, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
 
     companion object {
+        /**
+         * v1 -> v2: frame identity.
+         *
+         * `UPDATE` runs after the `ALTER`, not alongside it: `frameId` does not
+         * exist yet on the first statement, and `DEFAULT 0` would otherwise
+         * seed every pre-existing row with 0 — collapsing the entire history
+         * into a single occurrence with a span of years.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE events ADD COLUMN frameId INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL("UPDATE events SET frameId = timestamp WHERE frameId = 0")
+            }
+        }
+
         @Volatile private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase =
@@ -166,7 +213,12 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "adveto.db"
-                ).build().also { instance = it }
+                )
+                    // Never destructive here: the event log is the only record
+                    // of what the policy did, and dropping it silently on a
+                    // schema bump would delete evidence the gate depends on.
+                    .addMigrations(MIGRATION_1_2)
+                    .build().also { instance = it }
             }
     }
 }
