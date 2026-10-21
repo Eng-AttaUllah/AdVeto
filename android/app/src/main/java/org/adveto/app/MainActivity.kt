@@ -53,6 +53,19 @@ class MainActivity : ComponentActivity() {
         private const val SUSTAIN_MS = 60_000L
 
         /**
+         * How much of a sustained window may pass without a single frame
+         * before coverage stops counting as observed.
+         *
+         * Sampling is event-driven — `FRAME_INTERVAL_MS` is a ceiling, not a
+         * 1 Hz promise — so short quiet stretches on a still screen are
+         * correct behaviour and must not fail the gate. The allowance exists
+         * to catch the opposite failure: a window that was *touched* by frames
+         * at the start but not covered by them, which is exactly what a wall
+         * clock cannot distinguish from healthy delivery.
+         */
+        private const val DELIVERY_GAP_MS = 15_000L
+
+        /**
          * Per-frame latency budget, taken from the capture interval itself: the
          * service requests one frame per second, so a frame that costs more
          * than 1000 ms of detection + policy cannot sustain the rate it was
@@ -78,6 +91,13 @@ class MainActivity : ComponentActivity() {
     private var capturing = false
 
     private var frameCount = 0
+    // Wall-clock stamp of the first and most recent frame of the *current*
+    // session. GO-1 needs the span frames cover, not merely their count: a
+    // service that ran for 60 s while frames arrived only in the opening two
+    // of them has proved nothing about sustained delivery, and a bare timer
+    // cannot tell those two cases apart.
+    private var firstFrameAtMs = 0L
+    private var lastFrameAtMs = 0L
     private var lastRegionCount = 0
     private var lastTextHits = 0
     private var lastDetectMs = 0.0
@@ -126,6 +146,9 @@ class MainActivity : ComponentActivity() {
             when (intent.action) {
                 ScreenCaptureService.ACTION_FRAME_PROCESSED -> {
                     frameCount++
+                    val receivedAtMs = System.currentTimeMillis()
+                    if (firstFrameAtMs == 0L) firstFrameAtMs = receivedAtMs
+                    lastFrameAtMs = receivedAtMs
                     lastRegionCount = intent.getIntExtra(ScreenCaptureService.EXTRA_REGION_COUNT, 0)
                     lastTextHits = intent.getIntExtra(ScreenCaptureService.EXTRA_TEXT_HITS, 0)
                     lastDetectMs = intent.getDoubleExtra(ScreenCaptureService.EXTRA_FRAME_MS, 0.0)
@@ -148,6 +171,14 @@ class MainActivity : ComponentActivity() {
                         // second probe cannot erase a first probe's result.
                         captureStartedAtMs = System.currentTimeMillis()
                         lastUptimeMs = 0L
+                        // The comment above promises per-session counters, but
+                        // frameCount never actually reset — a restart silently
+                        // carried the previous run's total into the next run's
+                        // GO-1 evidence. Stamped with it are the two marks that
+                        // make the frame span meaningful for this session only.
+                        frameCount = 0
+                        firstFrameAtMs = 0L
+                        lastFrameAtMs = 0L
                     } else if (!capturing && wasCapturing) {
                         captureStartedAtMs.takeIf { it != 0L }?.let {
                             lastUptimeMs = System.currentTimeMillis() - it
@@ -378,22 +409,60 @@ class MainActivity : ComponentActivity() {
         // Each verdict is stated from what was actually observed. Nothing here
         // reports a pass on the strength of an intent being sent.
         val uptime = currentUptimeMs()
+        // The span the frames themselves cover. Guarded so a single frame can
+        // never produce a duration: one mark is a point, not an interval.
+        val frameSpanMs = if (frameCount >= 2) lastFrameAtMs - firstFrameAtMs else 0L
         when {
             uptime == 0L -> {
                 gate1Value.text = getString(R.string.gate_value_idle)
                 gate1Value.setTextColor(ContextCompat.getColor(this, R.color.textSecondary))
             }
             uptime >= SUSTAIN_MS -> {
-                gate1Value.text = "observed — held ${formatDuration(uptime)}"
-                gate1Value.setTextColor(ContextCompat.getColor(this, R.color.stateRunning))
+                // Two facts, stated apart. This line used to read "observed —
+                // held X" from the timer alone, so a service that survived the
+                // full window while pushing one frame would still have looked
+                // like a pass. Sustained delivery means frames actually span
+                // the window — and that the window was *covered* by frames,
+                // not merely touched at both ends.
+                val uncoveredMs = (uptime - frameSpanMs).coerceAtLeast(0L)
+                val deliverySustained = frameSpanMs >= SUSTAIN_MS
+                val coverageOk = deliverySustained && uncoveredMs <= DELIVERY_GAP_MS
+                gate1Value.text = when {
+                    frameCount == 0 ->
+                        "service held ${formatDuration(uptime)}; no frame arrived — " +
+                            "capture unproven"
+                    coverageOk ->
+                        "observed — held ${formatDuration(uptime)}; " +
+                            "$frameCount frames spanning ${formatDuration(frameSpanMs)}"
+                    deliverySustained ->
+                        "service held ${formatDuration(uptime)}; frames span " +
+                            "${formatDuration(frameSpanMs)} — " +
+                            "${formatDuration(uncoveredMs)} uncovered"
+                    else ->
+                        "service held ${formatDuration(uptime)} but " +
+                            "$frameCount frame(s) span ${formatDuration(frameSpanMs)} — " +
+                            "capture unproven"
+                }
+                gate1Value.setTextColor(
+                    ContextCompat.getColor(
+                        this,
+                        when {
+                            coverageOk -> R.color.stateRunning
+                            frameCount == 0 -> R.color.stateError
+                            else -> R.color.stateWarn
+                        }
+                    )
+                )
             }
             capturing -> {
                 gate1Value.text =
-                    "in progress — ${formatDuration(uptime)} of ${formatDuration(SUSTAIN_MS)}"
+                    "in progress — ${formatDuration(uptime)} of ${formatDuration(SUSTAIN_MS)}" +
+                        " · $frameCount frame(s)"
                 gate1Value.setTextColor(ContextCompat.getColor(this, R.color.stateWarn))
             }
             else -> {
-                gate1Value.text = "not sustained — ended at ${formatDuration(uptime)}"
+                gate1Value.text = "not sustained — ended at ${formatDuration(uptime)}" +
+                    " · $frameCount frame(s) spanning ${formatDuration(frameSpanMs)}"
                 gate1Value.setTextColor(ContextCompat.getColor(this, R.color.stateError))
             }
         }

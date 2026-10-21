@@ -77,6 +77,18 @@ class ScreenCaptureService : Service() {
         /** Minimum gap between processed frames. */
         const val FRAME_INTERVAL_MS = 1000L
 
+        /**
+         * Heartbeat period for the delivery watchdog.
+         *
+         * Independent of [FRAME_INTERVAL_MS] on purpose: the counters inside
+         * `onImage()` only ever print when a frame arrives, so a virtual
+         * display that pushes *nothing* — the exact case under investigation —
+         * would produce an empty log that is indistinguishable from a dead
+         * process. The watchdog runs on a separate tick precisely so silence
+         * at the reader becomes an observable line rather than an absence.
+         */
+        private const val DELIVERY_WATCHDOG_MS = 5_000L
+
         /** Set by the service while running; cleared on teardown. */
         @Volatile var instance: ScreenCaptureService? = null
     }
@@ -93,6 +105,28 @@ class ScreenCaptureService : Service() {
     private var lastFrameAt = 0L
 
     @Volatile private var running = false
+
+    // --- delivery diagnostics ------------------------------------------------
+    //
+    // Every exit path in onImage() used to be silent. That is what made the
+    // 6-frame / 173-second anomaly unresolvable: "the virtual display pushed
+    // nothing", "the frame was throttled", and "the conversion returned null"
+    // all produced the same log — no line at all. The three causes are
+    // separable only by knowing how often each path ran, so each is counted.
+    //
+    // Reading them:
+    //   raw == 0              no callbacks — nothing is being pushed
+    //   raw > 0, processed 0  frames arrive but die on the way; the nonzero
+    //                         counter names where
+    //   raw ~= processed      healthy; low `raw` on a static screen is normal
+    @Volatile private var rawFrames = 0L        // onImage() entered
+    @Volatile private var throttledFrames = 0L  // discarded by FRAME_INTERVAL_MS
+    @Volatile private var acquireFailed = 0L    // acquireLatestImage null/exception
+    @Volatile private var nullBitmap = 0L       // imageToBitmap returned null
+    @Volatile private var processedFrames = 0L  // reached the pipeline
+    /** Any callback at all, throttled or not — the watchdog's only witness. */
+    @Volatile private var lastCallbackAtMs = 0L
+    private var lastStatAtMs = 0L
 
     /** Latest frame retained for the UI/detector; memory-only by design. */
     @Volatile var latestFrame: Bitmap? = null
@@ -197,6 +231,33 @@ class ScreenCaptureService : Service() {
         instance = this
         emitState("running", "authorised")
         Log.i(TAG, "capture started ${screenWidth}x$screenHeight @$densityDpi")
+        startDeliveryWatchdog()
+    }
+
+    /**
+     * Repeating liveness probe on the capture thread.
+     *
+     * This is the line that separates "the projection is alive but the display
+     * has nothing to show" from "nothing is reaching the reader at all". Its
+     * `sinceCallbackMs` is the age of the *last raw callback*; `-1` means one
+     * has never been made since the session began. The loop re-arms only while
+     * [running], so `teardown()` stopping the flag also stops the tick without
+     * needing a separate cancellation path.
+     */
+    private fun startDeliveryWatchdog() {
+        val tick = object : Runnable {
+            override fun run() {
+                if (!running) return
+                val sinceCallbackMs =
+                    if (lastCallbackAtMs == 0L) -1L
+                    else System.currentTimeMillis() - lastCallbackAtMs
+                Log.i(TAG, "alive raw=$rawFrames processed=$processedFrames " +
+                        "throttled=$throttledFrames nullBitmap=$nullBitmap " +
+                        "sinceCallback_ms=$sinceCallbackMs")
+                handler?.postDelayed(this, DELIVERY_WATCHDOG_MS)
+            }
+        }
+        handler?.postDelayed(tick, DELIVERY_WATCHDOG_MS)
     }
 
     private fun startForegroundInternal() {
@@ -275,24 +336,46 @@ class ScreenCaptureService : Service() {
 
     private fun onImage(reader: ImageReader) {
         if (!running) return
+        rawFrames++
+        lastCallbackAtMs = System.currentTimeMillis()
         val now = System.currentTimeMillis()
         if (now - lastFrameAt < FRAME_INTERVAL_MS) {
             // Discard immediately so the reader buffer never back-pressures.
+            throttledFrames++
             discard(reader)
+            emitStats()
             return
         }
         lastFrameAt = now
 
         val image = try {
-            reader.acquireLatestImage() ?: return
+            reader.acquireLatestImage()
         } catch (e: Exception) {
+            acquireFailed++
             Log.w(TAG, "acquireLatestImage failed: ${e.message}")
+            emitStats()
+            return
+        }
+        if (image == null) {
+            acquireFailed++
+            emitStats()
             return
         }
 
         val started = System.nanoTime()
         try {
-            val bitmap = imageToBitmap(image) ?: return
+            val bitmap = imageToBitmap(image)
+            if (bitmap == null) {
+                nullBitmap++
+                // This path was `?: return` — entirely silent. A conversion
+                // failure was therefore indistinguishable from no frames ever
+                // arriving, which is the ambiguity the counters exist to remove.
+                Log.w(TAG, "imageToBitmap returned null (nullBitmap=$nullBitmap " +
+                        "of raw=$rawFrames) — dropped without processing")
+                emitStats()
+                return
+            }
+            processedFrames++
             latestFrame?.recycle()
             latestFrame = bitmap
 
@@ -326,6 +409,9 @@ class ScreenCaptureService : Service() {
             Log.i(TAG, "frame ${bitmap.width}x${bitmap.height} regions=${regions.size} " +
                     "textHits=${result.textHits} " +
                     "detect+policy_ms=%.1f events=${result.events.size}".format(elapsedMs))
+            // Forced: a run in which nothing processes must still print, since
+            // that is the very case under investigation.
+            emitStats(force = true)
 
             sendBroadcast(Intent(ACTION_FRAME_PROCESSED).apply {
                 setPackage(packageName)
@@ -338,6 +424,24 @@ class ScreenCaptureService : Service() {
         } finally {
             image.close()
         }
+    }
+
+    /**
+     * Counter heartbeat.
+     *
+     * Rate-limited so a 60 Hz display cannot flood the buffer, but forced on
+     * every processed frame. The rate limit is the point rather than a nicety:
+     * if counters were printed only on success, the failure mode being hunted
+     * would emit nothing whatsoever — the same silence that concealed the
+     * problem originally. A `raw`-only run still prints every 5 s.
+     */
+    private fun emitStats(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastStatAtMs < 5_000L) return
+        lastStatAtMs = now
+        Log.i(TAG, "stats raw=$rawFrames throttled=$throttledFrames " +
+                "acquireNull=$acquireFailed nullBitmap=$nullBitmap " +
+                "processed=$processedFrames running=$running")
     }
 
     private fun discard(reader: ImageReader) {
